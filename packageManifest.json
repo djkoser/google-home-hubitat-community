@@ -1,17 +1,17 @@
 {
-  "packageName": "Google Home Community",
-  "author": "Miles Budnek",
+  "packageName": "Google Home Community - DK Fork",
+  "author": "Miles Budnek & David Koser",
   "version": "0.37.4",
   "minimumHEVersion": "0.0",
-  "documentationLink": "https://github.com/mbudnek/google-home-hubitat-community/blob/master/README.md",
+  "documentationLink": "https://github.com/djkoser/google-home-hubitat-community/blob/master/README.md",
   "communityLink": "https://community.hubitat.com/t/alpha-community-maintained-google-home-integration/34957",
   "dateReleased": "2020-08-06",
   "apps": [
     {
-      "id": "b2ff1880-4b4c-4b1d-81d7-fce0ced1044a",
-      "name": "Google Home Community",
-      "namespace": "mbudnek",
-      "location": "https://raw.githubusercontent.com/mbudnek/google-home-hubitat-community/master/google-home-community.groovy",
+      "id": "aadb49d4-cd2c-4393-b18c-39193a1353f9",
+      "name": "Google Home Community - DK Fork",
+      "namespace": "djkoser",
+      "location": "https://raw.githubusercontent.com/djkoser/google-home-hubitat-community/refs/heads/master/google-home-community.groovy",
       "required": true,
       "oauth": true
     }
