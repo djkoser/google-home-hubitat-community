@@ -3452,8 +3452,10 @@ private deviceStateForTrait_SensorState(deviceTrait, device) {
         def deviceStateMapping = [:]
         deviceStateMapping << [ name: sensorType.key ]
         if (deviceTrait.sensorTypes[sensorType.key].reportsDescriptiveState) {
+            def rawValue = device.currentValue(deviceTrait.sensorTypes[sensorType.key].descriptiveAttribute)
+            def translatedValue = translateSensorValue(sensorType.key, rawValue)
             deviceStateMapping << [
-                currentSensorState: device.currentValue(deviceTrait.sensorTypes[sensorType.key].descriptiveAttribute),
+                currentSensorState: translatedValue,
             ]
         }
         if (deviceTrait.sensorTypes[sensorType.key].reportsNumericState) {
@@ -3467,6 +3469,33 @@ private deviceStateForTrait_SensorState(deviceTrait, device) {
     return [
         currentSensorStateData: deviceState
     ]
+}
+
+/**
+ * Translates device-specific sensor values to Google Home expected values
+ * @param sensorType The sensor type (e.g., "WaterLeak", "SmokeLevel")
+ * @param deviceValue The raw value from the Hubitat device
+ * @return The translated value that Google Home expects, or the original value if no translation exists
+ */
+private translateSensorValue(sensorType, deviceValue) {
+    if (!deviceValue) {
+        return deviceValue
+    }
+    
+    // Convert to lowercase string for case-insensitive matching
+    def normalizedValue = deviceValue.toString().toLowerCase().trim()
+    
+    // Check if this sensor type has translation mappings
+    if (GOOGLE_SENSOR_STATES[sensorType]?.valueTranslations) {
+        def translation = GOOGLE_SENSOR_STATES[sensorType].valueTranslations[normalizedValue]
+        if (translation) {
+            LOGGER.info("Translated sensor value for ${sensorType}: '${deviceValue}' -> '${translation}'")
+            return translation
+        }
+    }
+    
+    // No translation found, return original value
+    return deviceValue
 }
 
 @SuppressWarnings(['UnusedPrivateMethod', 'UnusedPrivateMethodParameter'])
@@ -5462,6 +5491,20 @@ private static final GOOGLE_SENSOR_STATES = [
             "no carbon monoxide detected":       "No Carbon Monoxide Detected",
             "unknown":                           "Unknown",
         ],
+        "valueTranslations" : [
+            // Common device value -> Google expected value mappings
+            "detected":                          "carbon monoxide detected",
+            "not detected":                      "no carbon monoxide detected",
+            "active":                            "carbon monoxide detected",
+            "inactive":                          "no carbon monoxide detected",
+            "clear":                             "no carbon monoxide detected",
+            "co":                                "carbon monoxide detected",
+            "no co":                             "no carbon monoxide detected",
+            "true":                              "carbon monoxide detected",
+            "false":                             "no carbon monoxide detected",
+            "1":                                 "carbon monoxide detected",
+            "0":                                 "no carbon monoxide detected",
+        ],
         "numericAttribute":                      "carbonMonoxideValue",
         "numericUnits" :                         "PARTS_PER_MILLION",
     ],
@@ -5474,6 +5517,20 @@ private static final GOOGLE_SENSOR_STATES = [
             "high":                              "High",
             "no smoke detected":                 "No Smoke Detected",
             "unknown":                           "Unknown",
+        ],
+        "valueTranslations" : [
+            // Common device value -> Google expected value mappings
+            "detected":                          "smoke detected",
+            "not detected":                      "no smoke detected",
+            "active":                            "smoke detected",
+            "inactive":                          "no smoke detected",
+            "clear":                             "no smoke detected",
+            "smoke":                             "smoke detected",
+            "no smoke":                          "no smoke detected",
+            "true":                              "smoke detected",
+            "false":                             "no smoke detected",
+            "1":                                 "smoke detected",
+            "0":                                 "no smoke detected",
         ],
         "numericAttribute":                      "smokeLevelValue",
         "numericUnits" :                         "PARTS_PER_MILLION",
@@ -5500,6 +5557,21 @@ private static final GOOGLE_SENSOR_STATES = [
             "no leak":                           "No Leak",
             "unknown":                           "Unknown",
         ],
+        "valueTranslations" : [
+            // Common device value -> Google expected value mappings
+            "wet":                               "leak",
+            "dry":                               "no leak",
+            "water":                             "leak",
+            "no water":                          "no leak",
+            "detected":                          "leak",
+            "not detected":                      "no leak",
+            "active":                            "leak",
+            "inactive":                          "no leak",
+            "true":                              "leak",
+            "false":                             "no leak",
+            "1":                                 "leak",
+            "0":                                 "no leak",
+        ],
         "numericAttribute":                      "",
         "numericUnits" :                         "",
     ],
@@ -5511,6 +5583,21 @@ private static final GOOGLE_SENSOR_STATES = [
             "rain detected":                     "Rain Detected",
             "no rain detected":                  "No Rain Detected",
             "unknown":                           "Unknown",
+        ],
+        "valueTranslations" : [
+            // Common device value -> Google expected value mappings
+            "wet":                               "rain detected",
+            "dry":                               "no rain detected",
+            "raining":                           "rain detected",
+            "not raining":                       "no rain detected",
+            "detected":                          "rain detected",
+            "not detected":                      "no rain detected",
+            "active":                            "rain detected",
+            "inactive":                          "no rain detected",
+            "true":                              "rain detected",
+            "false":                             "no rain detected",
+            "1":                                 "rain detected",
+            "0":                                 "no rain detected",
         ],
         "numericAttribute":                      "",
         "numericUnits" :                         "",
