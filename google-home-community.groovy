@@ -97,15 +97,15 @@ import com.nimbusds.jwt.JWTClaimsSet
 import com.nimbusds.jwt.SignedJWT
 
 definition(
-    name: "Google Home Community",
-    namespace: "mbudnek",
-    author: "Miles Budnek",
+    name: "Google Home Community - DK Fork",
+    namespace: "djkoser",
+    author: "Miles Budnek & David Koser",
     description: "Community-maintained Google Home integration",
     category: "Integrations",
     iconUrl: "",
     iconX2Url: "",
     iconX3Url: "",
-    importUrl: "https://raw.githubusercontent.com/mbudnek/google-home-hubitat-community/master/google-home-community.groovy"  // IgnoreLineLength
+    importUrl: "https://raw.githubusercontent.com/djkoser/google-home-hubitat-community/master/google-home-community.groovy"  // IgnoreLineLength
 )
 
 preferences {
