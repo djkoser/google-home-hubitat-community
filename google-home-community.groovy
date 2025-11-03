@@ -1427,6 +1427,32 @@ private deviceTraitPreferences_OpenClose(deviceTrait) {
                 title: "Reverse Direction",
                 type: "bool"
             )
+            paragraph("Enable this if your device can only position upward from closed (common with garage doors)")
+            input(
+                name: "${deviceTrait.name}.unidirectionalPositioning",
+                title: "Unidirectional Positioning",
+                description: "Device can only move to higher positions from closed. Lower positions require close→reopen sequence.",
+                type: "bool",
+                defaultValue: false
+            )
+            paragraph("Debounce rapid position commands (recommended for devices that get overwhelmed by quick slider movements)")
+            input(
+                name: "${deviceTrait.name}.debouncePositionCommands",
+                title: "Debounce Position Commands",
+                description: "Wait for user to stop moving slider before sending position command. Prevents rapid-fire commands.",
+                type: "bool",
+                defaultValue: false,
+                submitOnChange: true
+            )
+            if (deviceTrait.debouncePositionCommands) {
+                input(
+                    name: "${deviceTrait.name}.debounceDelaySeconds",
+                    title: "Debounce Delay (seconds)",
+                    description: "How long to wait after last position change before sending command (0.5 to 5.0 seconds)",
+                    type: "decimal",
+                    defaultValue: 1.0
+                )
+            }
         }
         input(
             name: "${deviceTrait.name}.queryOnly",
@@ -2772,7 +2798,37 @@ private executeCommand_OpenClose(deviceInfo, command) {
         if (openCloseTrait.reverseDirection) {
             hubitatOpenPercent = 100 - openPercent
         }
-        deviceInfo.device."${openCloseTrait.openPositionCommand}"(hubitatOpenPercent)
+        
+        // Handle unidirectional positioning
+        if (openCloseTrait.unidirectionalPositioning && hubitatOpenPercent > 0) {
+            def currentPosition = deviceInfo.device.currentValue(openCloseTrait.openCloseAttribute)
+            def currentPercent = currentPosition instanceof Number ? currentPosition as int : 0
+            
+            // If target is lower than current position, force to 0 (closed)
+            if (hubitatOpenPercent < currentPercent) {
+                LOGGER.info("Unidirectional positioning: target ${hubitatOpenPercent}% is lower than current ${currentPercent}%, closing door instead")
+                hubitatOpenPercent = 0
+            }
+        }
+        
+        // Handle debouncing for position commands
+        if (openCloseTrait.debouncePositionCommands) {
+            def delaySeconds = (openCloseTrait.debounceDelaySeconds ?: 1) as int
+            
+            // Use built-in overwrite behavior for debouncing
+            runIn(delaySeconds, "debouncedPositionCommand", [
+                overwrite: true,
+                data: [
+                    deviceId: deviceInfo.device.id,
+                    command: openCloseTrait.openPositionCommand,
+                    position: hubitatOpenPercent
+                ]
+            ])
+        } else {
+            // Execute the position command immediately
+            deviceInfo.device."${openCloseTrait.openPositionCommand}"(hubitatOpenPercent)
+        }
+        
         checkValue = { value ->
             if (hubitatOpenPercent == 100) {
                 // Handle Z-Wave shades which only go to 99.
@@ -2789,6 +2845,18 @@ private executeCommand_OpenClose(deviceInfo, command) {
             openPercent: openPercent,
         ],
     ]
+}
+
+def debouncedPositionCommand(data) {
+    def allDevices = allKnownDevices()
+    def deviceInfo = allDevices[data.deviceId.toString()]
+    
+    if (deviceInfo?.device) {
+        LOGGER.info("Executing debounced position command: ${data.command}(${data.position})")
+        deviceInfo.device."${data.command}"(data.position)
+    } else {
+        LOGGER.warn("Device ${data.deviceId} not found for debounced position command")
+    }
 }
 
 @SuppressWarnings('UnusedPrivateMethod')
@@ -4351,6 +4419,9 @@ private traitFromSettings_OpenClose(traitName) {
         openCloseTrait.closedValue = settings."${traitName}.closedValue"
     } else {
         openCloseTrait.reverseDirection = settings."${traitName}.reverseDirection" as boolean
+        openCloseTrait.unidirectionalPositioning = settings."${traitName}.unidirectionalPositioning" as boolean
+        openCloseTrait.debouncePositionCommands = settings."${traitName}.debouncePositionCommands" as boolean
+        openCloseTrait.debounceDelaySeconds = settings."${traitName}.debounceDelaySeconds" ?: 1
     }
 
     if (!openCloseTrait.queryOnly) {
@@ -4897,6 +4968,9 @@ private deleteDeviceTrait_OpenClose(deviceTrait) {
     app.removeSetting("${deviceTrait.name}.openValue")
     app.removeSetting("${deviceTrait.name}.closedValue")
     app.removeSetting("${deviceTrait.name}.reverseDirection")
+    app.removeSetting("${deviceTrait.name}.unidirectionalPositioning")
+    app.removeSetting("${deviceTrait.name}.debouncePositionCommands")
+    app.removeSetting("${deviceTrait.name}.debounceDelaySeconds")
     app.removeSetting("${deviceTrait.name}.openCommand")
     app.removeSetting("${deviceTrait.name}.closeCommand")
     app.removeSetting("${deviceTrait.name}.openPositionCommand")
@@ -5188,6 +5262,11 @@ private roundTo(number, decimalPlaces) {
 }
 
 private googlePercentageToHubitat(percentage) {
+    // Handle null values
+    if (percentage == null) {
+        return 0
+    }
+    
     // Google is documented to provide percentages in the range [0..100], as
     // is Hubitat's SwitchLevel (setLevel), WindowBlind (setPosition).
     //
@@ -5196,6 +5275,11 @@ private googlePercentageToHubitat(percentage) {
 }
 
 private hubitatPercentageToGoogle(percentage) {
+    // Handle null values
+    if (percentage == null) {
+        return 0
+    }
+    
     // Hubitat's driver capabilities for SwitchLevel (setLevel) and WindowBlind
     // (setPosition) are documented to use the range [0..100], but several
     // Z-Wave dimmer devices return values in the range [0..99].
