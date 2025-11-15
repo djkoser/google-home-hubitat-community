@@ -2763,7 +2763,7 @@ private executeCommand_OnOff(deviceInfo, command) {
     } else {
         checkMfa(deviceInfo, "Off", command)
         off(deviceInfo.device)
-        if (onOffTrait.onValue) {
+        if (onOffTrait.offValue) {
             checkValue = onOffTrait.offValue
         } else {
             checkValue = { value -> value != onOffTrait.onValue }
