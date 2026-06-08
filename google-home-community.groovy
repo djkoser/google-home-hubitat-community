@@ -2801,19 +2801,19 @@ private executeCommand_OpenClose(deviceInfo, command) {
         if (openCloseTrait.reverseDirection) {
             hubitatOpenPercent = 100 - openPercent
         }
-        
+
         // Handle unidirectional positioning
         if (openCloseTrait.unidirectionalPositioning && hubitatOpenPercent > 0) {
             def currentPosition = deviceInfo.device.currentValue(openCloseTrait.openCloseAttribute)
             def currentPercent = currentPosition instanceof Number ? currentPosition as int : 0
-            
+
             // If target is lower than current position, force to 0 (closed)
             if (hubitatOpenPercent < currentPercent) {
                 LOGGER.debug("Unidirectional positioning: target ${hubitatOpenPercent}% is lower than current ${currentPercent}%, closing door instead")
                 hubitatOpenPercent = 0
             }
         }
-        
+
         // Handle debouncing for position commands
         if (openCloseTrait.debouncePositionCommands) {
             // Delay is a decimal setting (e.g. 0.5s); use runInMillis so sub-second
@@ -2833,7 +2833,7 @@ private executeCommand_OpenClose(deviceInfo, command) {
             // Execute the position command immediately
             deviceInfo.device."${openCloseTrait.openPositionCommand}"(hubitatOpenPercent)
         }
-        
+
         checkValue = { value ->
             if (hubitatOpenPercent == 100) {
                 // Handle Z-Wave shades which only go to 99.
@@ -2852,10 +2852,11 @@ private executeCommand_OpenClose(deviceInfo, command) {
     ]
 }
 
-def debouncedPositionCommand(data) {
+@SuppressWarnings('UnusedPrivateMethod')
+private debouncedPositionCommand(data) {
     def allDevices = allKnownDevices()
     def deviceInfo = allDevices[data.deviceId.toString()]
-    
+
     if (deviceInfo?.device) {
         LOGGER.debug("Executing debounced position command: ${data.command}(${data.position})")
         deviceInfo.device."${data.command}"(data.position)
@@ -3554,10 +3555,10 @@ private translateSensorValue(sensorType, deviceValue) {
     if (!deviceValue) {
         return deviceValue
     }
-    
+
     // Convert to lowercase string for case-insensitive matching
     def normalizedValue = deviceValue.toString().toLowerCase().trim()
-    
+
     // Check if this sensor type has translation mappings
     if (GOOGLE_SENSOR_STATES[sensorType]?.valueTranslations) {
         def translation = GOOGLE_SENSOR_STATES[sensorType].valueTranslations[normalizedValue]
@@ -3566,7 +3567,7 @@ private translateSensorValue(sensorType, deviceValue) {
             return translation
         }
     }
-    
+
     // No translation found, return original value
     return deviceValue
 }
@@ -5271,7 +5272,7 @@ private googlePercentageToHubitat(percentage) {
     if (percentage == null) {
         return 0
     }
-    
+
     // Google is documented to provide percentages in the range [0..100], as
     // is Hubitat's SwitchLevel (setLevel), WindowBlind (setPosition).
     //
@@ -5284,7 +5285,7 @@ private hubitatPercentageToGoogle(percentage) {
     if (percentage == null) {
         return 0
     }
-    
+
     // Hubitat's driver capabilities for SwitchLevel (setLevel) and WindowBlind
     // (setPosition) are documented to use the range [0..100], but several
     // Z-Wave dimmer devices return values in the range [0..99].
