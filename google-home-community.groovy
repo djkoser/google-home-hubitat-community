@@ -1452,6 +1452,7 @@ private deviceTraitPreferences_OpenClose(deviceTrait) {
                     title: "Debounce Delay (seconds)",
                     description: "How long to wait after last position change before sending command (0.5 to 5.0 seconds)",
                     type: "decimal",
+                    range: "0.5..5.0",
                     defaultValue: 1.0
                 )
             }
@@ -2808,17 +2809,19 @@ private executeCommand_OpenClose(deviceInfo, command) {
             
             // If target is lower than current position, force to 0 (closed)
             if (hubitatOpenPercent < currentPercent) {
-                LOGGER.info("Unidirectional positioning: target ${hubitatOpenPercent}% is lower than current ${currentPercent}%, closing door instead")
+                LOGGER.debug("Unidirectional positioning: target ${hubitatOpenPercent}% is lower than current ${currentPercent}%, closing door instead")
                 hubitatOpenPercent = 0
             }
         }
         
         // Handle debouncing for position commands
         if (openCloseTrait.debouncePositionCommands) {
-            def delaySeconds = (openCloseTrait.debounceDelaySeconds ?: 1) as int
-            
+            // Delay is a decimal setting (e.g. 0.5s); use runInMillis so sub-second
+            // values aren't truncated to whole seconds (or to 0) by runIn.
+            def delayMillis = ((openCloseTrait.debounceDelaySeconds ?: 1) * 1000) as long
+
             // Use built-in overwrite behavior for debouncing
-            runIn(delaySeconds, "debouncedPositionCommand", [
+            runInMillis(delayMillis, "debouncedPositionCommand", [
                 overwrite: true,
                 data: [
                     deviceId: deviceInfo.device.id,
@@ -2854,7 +2857,7 @@ def debouncedPositionCommand(data) {
     def deviceInfo = allDevices[data.deviceId.toString()]
     
     if (deviceInfo?.device) {
-        LOGGER.info("Executing debounced position command: ${data.command}(${data.position})")
+        LOGGER.debug("Executing debounced position command: ${data.command}(${data.position})")
         deviceInfo.device."${data.command}"(data.position)
     } else {
         LOGGER.warn("Device ${data.deviceId} not found for debounced position command")
@@ -3559,7 +3562,7 @@ private translateSensorValue(sensorType, deviceValue) {
     if (GOOGLE_SENSOR_STATES[sensorType]?.valueTranslations) {
         def translation = GOOGLE_SENSOR_STATES[sensorType].valueTranslations[normalizedValue]
         if (translation) {
-            LOGGER.info("Translated sensor value for ${sensorType}: '${deviceValue}' -> '${translation}'")
+            LOGGER.debug("Translated sensor value for ${sensorType}: '${deviceValue}' -> '${translation}'")
             return translation
         }
     }
