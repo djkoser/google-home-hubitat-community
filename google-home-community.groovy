@@ -82,6 +82,8 @@
 //   * Jun 06 2023 - Add support for the OccupancySensing trait
 //   * Apr 12 2024 - Code cleanup
 //   * May 08 2026 - Move to the new "Integrations" menu
+//   * Jun 16 2026 - Optimize 'updated' method to only call 'allKnownDevices' once
+//   * Aug 03 2026 - Fix Authorization header in Report State requests on Hubitat 2.5.1
 
 import groovy.json.JsonException
 import groovy.json.JsonOutput
@@ -139,10 +141,11 @@ def updated() {
     if (settings.googleServiceAccountJSON) {
         requestSync()
         if (settings.reportState) {
-            allKnownDevices().each { entry ->
+            def devices = allKnownDevices()
+            devices.each { entry ->
                 subscribe(entry.value.device, "handleDeviceEvent", [filterEvents: true])
             }
-            reportStateForDevices(allKnownDevices())
+            reportStateForDevices(devices)
         }
     }
 }
@@ -190,7 +193,7 @@ private reportStateForDevices(devices) {
             body: req,
         ]
         LOGGER.debug("Posting device state requestId=${requestId}: ${params}")
-        params.headers.authorization = "Bearer ${token}"
+        params.headers.Authorization = "Bearer ${token}"
         try {
             httpPostJson(params) { resp ->
                 LOGGER.debug("Finished posting device state requestId=${requestId}")
@@ -396,7 +399,7 @@ def mainPreferences() {
     }
 }
 
-@SuppressWarnings('MethodSize')
+@SuppressWarnings(['MethodSize', 'CyclomaticComplexity'])
 def deviceTypePreferences(deviceType) {
     state.remove("currentlyEditingDeviceTrait")
     if (deviceType == null) {
