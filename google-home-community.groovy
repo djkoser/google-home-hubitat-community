@@ -85,6 +85,7 @@
 //   * Jun 16 2026 - Optimize 'updated' method to only call 'allKnownDevices' once
 //   * Aug 03 2026 - Fix Authorization header in Report State requests on Hubitat 2.5.1
 //   * Nov 24 2026 - SensorState: skip sensor types a device has no reading for
+//   * Nov 25 2026 - Add a query-only Modes trait (shows a multi-value attribute, e.g. ERV On/Recirculate/Off)
 
 import groovy.json.JsonException
 import groovy.json.JsonOutput
@@ -2068,6 +2069,31 @@ private deviceTraitPreferences_Timer(deviceTrait) {
 }
 
 @SuppressWarnings('UnusedPrivateMethod')
+private deviceTraitPreferences_Modes(deviceTrait) {
+    section("Modes Settings (query only)") {
+        paragraph("Reports one device attribute as a Google mode, e.g. ERV status On / Recirculate / Off. " +
+                  "Google can show and speak it but can't change it.")
+        input(
+            name: "${deviceTrait.name}.modeName",
+            title: "Mode name (what Google calls it, e.g. Ventilation)",
+            type: "text",
+            required: true
+        )
+        input(
+            name: "${deviceTrait.name}.modeAttribute",
+            title: "Mode attribute",
+            type: "text",
+            required: true
+        )
+        input(
+            name: "${deviceTrait.name}.modeValues",
+            title: "Attribute values (comma-separated, e.g. On,Recirculate,Off)",
+            type: "text",
+            required: true
+        )
+    }
+}
+
 private deviceTraitPreferences_Toggles(deviceTrait) {
     section("Toggles") {
         deviceTrait.toggles.each { toggle ->
@@ -3684,6 +3710,16 @@ private deviceStateForTrait_Timer(deviceTrait, device) {
 }
 
 @SuppressWarnings('UnusedPrivateMethod')
+private deviceStateForTrait_Modes(deviceTrait, device) {
+    def value = device.currentValue(deviceTrait.modeAttribute)
+    if (value == null) {
+        return [:]
+    }
+    return [
+        currentModeSettings: [(googleModeKey(deviceTrait.modeName)): googleModeKey(value)],
+    ]
+}
+
 private deviceStateForTrait_Toggles(deviceTrait, device) {
     return [
         currentToggleSettings: deviceTrait.toggles.collectEntries { toggle ->
@@ -4156,6 +4192,28 @@ private attributesForTrait_Timer(deviceTrait, device) {
 }
 
 @SuppressWarnings(['UnusedPrivateMethod', 'UnusedPrivateMethodParameter'])
+private attributesForTrait_Modes(deviceTrait, device) {
+    return [
+        availableModes: [[
+            name: googleModeKey(deviceTrait.modeName),
+            name_values: [[name_synonym: [deviceTrait.modeName], lang: "en"]],
+            settings: deviceTrait.modeValues.collect { value ->
+                [
+                    setting_name: googleModeKey(value),
+                    setting_values: [[setting_synonym: [value], lang: "en"]],
+                ]
+            },
+            ordered: false,
+        ]],
+        queryOnlyModes: true,
+    ]
+}
+
+// Google mode and setting names: lower case, no spaces
+private String googleModeKey(value) {
+    return value.toString().trim().toLowerCase().replaceAll(/[^a-z0-9]+/, "_")
+}
+
 private attributesForTrait_Toggles(deviceTrait, device) {
     return [
         availableToggles: deviceTrait.toggles.collect { toggle ->
@@ -4721,6 +4779,15 @@ private traitFromSettings_Timer(traitName) {
 }
 
 @SuppressWarnings('UnusedPrivateMethod')
+private traitFromSettings_Modes(traitName) {
+    return [
+        modeName:      settings."${traitName}.modeName",
+        modeAttribute: settings."${traitName}.modeAttribute",
+        modeValues:    (settings."${traitName}.modeValues" ?: "").split(",").collect { it.trim() }.findAll { it },
+        commands:      [],
+    ]
+}
+
 private traitFromSettings_Toggles(traitName) {
     def togglesTrait = [
         toggles:  [],
@@ -5121,6 +5188,12 @@ private deleteDeviceTrait_Volume(deviceTrait) {
 }
 
 @SuppressWarnings('UnusedPrivateMethod')
+private deleteDeviceTrait_Modes(deviceTrait) {
+    app.removeSetting("${deviceTrait.name}.modeName")
+    app.removeSetting("${deviceTrait.name}.modeAttribute")
+    app.removeSetting("${deviceTrait.name}.modeValues")
+}
+
 private deleteDeviceTrait_Toggles(deviceTrait) {
     deviceTrait.toggles.each { toggle ->
         deleteToggle(toggle)
@@ -5521,6 +5594,7 @@ private static final GOOGLE_DEVICE_TRAITS = [
     Locator: "Locator",
     LockUnlock: "Lock/Unlock",
     MediaState: "Media State",
+    Modes: "Modes",
     //Modes: "Modes",
     //NetworkControl: "Network Control",
     //ObjectDetection: "Object Detection",
