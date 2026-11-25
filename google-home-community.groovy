@@ -85,6 +85,7 @@
 //   * Jun 16 2026 - Optimize 'updated' method to only call 'allKnownDevices' once
 //   * Aug 03 2026 - Fix Authorization header in Report State requests on Hubitat 2.5.1
 //   * Nov 24 2026 - SensorState: skip sensor types a device has no reading for
+//   * Nov 25 2026 - Modes trait: more than one mode per device
 //   * Nov 25 2026 - Log Home Graph's error body when a state report fails
 //   * Nov 25 2026 - Add a query-only Modes trait (shows a multi-value attribute, e.g. ERV On/Recirculate/Off)
 
@@ -2094,6 +2095,12 @@ private deviceTraitPreferences_Modes(deviceTrait) {
             type: "text",
             required: true
         )
+        input(
+            name: "${deviceTrait.name}.moreModes",
+            title: "More modes, one per line: Name | attribute | value1,value2,...",
+            type: "textarea",
+            required: false
+        )
     }
 }
 
@@ -3714,13 +3721,14 @@ private deviceStateForTrait_Timer(deviceTrait, device) {
 
 @SuppressWarnings('UnusedPrivateMethod')
 private deviceStateForTrait_Modes(deviceTrait, device) {
-    def value = device.currentValue(deviceTrait.modeAttribute)
-    if (value == null) {
-        return [:]
+    def current = [:]
+    deviceTrait.modes.each { mode ->
+        def value = device.currentValue(mode.attribute)
+        if (value != null) {
+            current[googleModeKey(mode.name)] = googleModeKey(value)
+        }
     }
-    return [
-        currentModeSettings: [(googleModeKey(deviceTrait.modeName)): googleModeKey(value)],
-    ]
+    return current ? [currentModeSettings: current] : [:]
 }
 
 private deviceStateForTrait_Toggles(deviceTrait, device) {
@@ -4197,17 +4205,19 @@ private attributesForTrait_Timer(deviceTrait, device) {
 @SuppressWarnings(['UnusedPrivateMethod', 'UnusedPrivateMethodParameter'])
 private attributesForTrait_Modes(deviceTrait, device) {
     return [
-        availableModes: [[
-            name: googleModeKey(deviceTrait.modeName),
-            name_values: [[name_synonym: [deviceTrait.modeName], lang: "en"]],
-            settings: deviceTrait.modeValues.collect { value ->
-                [
-                    setting_name: googleModeKey(value),
-                    setting_values: [[setting_synonym: [value], lang: "en"]],
-                ]
-            },
-            ordered: false,
-        ]],
+        availableModes: deviceTrait.modes.collect { mode ->
+            [
+                name: googleModeKey(mode.name),
+                name_values: [[name_synonym: [mode.name], lang: "en"]],
+                settings: mode.values.collect { value ->
+                    [
+                        setting_name: googleModeKey(value),
+                        setting_values: [[setting_synonym: [value], lang: "en"]],
+                    ]
+                },
+                ordered: false,
+            ]
+        },
         queryOnlyModes: true,
     ]
 }
@@ -4783,11 +4793,21 @@ private traitFromSettings_Timer(traitName) {
 
 @SuppressWarnings('UnusedPrivateMethod')
 private traitFromSettings_Modes(traitName) {
+    def splitValues = { String v -> (v ?: "").split(",").collect { it.trim() }.findAll { it } }
+    def modes = [[
+        name:      settings."${traitName}.modeName",
+        attribute: settings."${traitName}.modeAttribute",
+        values:    splitValues(settings."${traitName}.modeValues"),
+    ]]
+    (settings."${traitName}.moreModes" ?: "").readLines().each { line ->
+        def parts = line.split(/\|/).collect { it.trim() }
+        if (parts.size() == 3 && parts.every { it }) {
+            modes << [name: parts[0], attribute: parts[1], values: splitValues(parts[2])]
+        }
+    }
     return [
-        modeName:      settings."${traitName}.modeName",
-        modeAttribute: settings."${traitName}.modeAttribute",
-        modeValues:    (settings."${traitName}.modeValues" ?: "").split(",").collect { it.trim() }.findAll { it },
-        commands:      [],
+        modes:    modes.findAll { it.name && it.attribute && it.values },
+        commands: [],
     ]
 }
 
@@ -5195,6 +5215,7 @@ private deleteDeviceTrait_Modes(deviceTrait) {
     app.removeSetting("${deviceTrait.name}.modeName")
     app.removeSetting("${deviceTrait.name}.modeAttribute")
     app.removeSetting("${deviceTrait.name}.modeValues")
+    app.removeSetting("${deviceTrait.name}.moreModes")
 }
 
 private deleteDeviceTrait_Toggles(deviceTrait) {
