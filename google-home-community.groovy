@@ -85,6 +85,8 @@
 //   * Jun 16 2026 - Optimize 'updated' method to only call 'allKnownDevices' once
 //   * Aug 03 2026 - Fix Authorization header in Report State requests on Hubitat 2.5.1
 //   * Nov 24 2026 - SensorState: skip sensor types a device has no reading for
+//   * Nov 25 2026 - Modes trait: values can come from a device attribute ("@attr", a JSON list),
+//                   re-syncing with Google when that list changes
 //   * Nov 25 2026 - Modes trait: more than one mode per device
 //   * Nov 25 2026 - Log Home Graph's error body when a state report fails
 //   * Nov 25 2026 - Add a query-only Modes trait (shows a multi-value attribute, e.g. ERV On/Recirculate/Off)
@@ -158,6 +160,11 @@ def handleDeviceEvent(event) {
     LOGGER.debug("Handling device event, deviceId=${event.deviceId} device=${event.device}")
     def deviceId = event.deviceId
     def deviceInfo = allKnownDevices()."${deviceId}"
+    // A Modes value list ("@attr") changed: Google must re-sync to learn the new values
+    if (deviceInfo?.deviceType?.traits?.Modes?.modes?.any { it.valuesAttribute == event.name }) {
+        runIn(10, "requestSync", [overwrite: true])
+        return
+    }
     reportStateForDevices([(deviceId): deviceInfo])
 }
 
@@ -2097,7 +2104,7 @@ private deviceTraitPreferences_Modes(deviceTrait) {
         )
         input(
             name: "${deviceTrait.name}.moreModes",
-            title: "More modes, one per line: Name | attribute | value1,value2,...",
+            title: "More modes, one per line: Name | attribute | value1,value2,... (or @attribute: a device attribute holding a JSON list of values)",
             type: "textarea",
             required: false
         )
@@ -3724,7 +3731,7 @@ private deviceStateForTrait_Modes(deviceTrait, device) {
     def current = [:]
     deviceTrait.modes.each { mode ->
         def value = device.currentValue(mode.attribute)
-        if (value != null) {
+        if (value != null && googleModeKey(value) in modeValuesFor(mode, device).collect { googleModeKey(it) }) {
             current[googleModeKey(mode.name)] = googleModeKey(value)
         }
     }
@@ -4209,7 +4216,7 @@ private attributesForTrait_Modes(deviceTrait, device) {
             [
                 name: googleModeKey(mode.name),
                 name_values: [[name_synonym: [mode.name], lang: "en"]],
-                settings: mode.values.collect { value ->
+                settings: modeValuesFor(mode, device).collect { value ->
                     [
                         setting_name: googleModeKey(value),
                         setting_values: [[setting_synonym: [value], lang: "en"]],
@@ -4220,6 +4227,20 @@ private attributesForTrait_Modes(deviceTrait, device) {
         },
         queryOnlyModes: true,
     ]
+}
+
+// A mode's values: listed in the settings, or "@attr" = a device attribute holding a JSON list
+private List modeValuesFor(mode, device) {
+    if (!mode.valuesAttribute) {
+        return mode.values
+    }
+    try {
+        def list = parseJson(device.currentValue(mode.valuesAttribute)?.toString() ?: "[]")
+        return list instanceof List ? list.collect { it.toString() } : []
+    } catch (Exception ex) {
+        LOGGER.warn("Modes: ${device} ${mode.valuesAttribute} is not a JSON list")
+        return []
+    }
 }
 
 // Google mode and setting names: lower case, no spaces
@@ -4793,20 +4814,21 @@ private traitFromSettings_Timer(traitName) {
 
 @SuppressWarnings('UnusedPrivateMethod')
 private traitFromSettings_Modes(traitName) {
-    def splitValues = { String v -> (v ?: "").split(",").collect { it.trim() }.findAll { it } }
-    def modes = [[
-        name:      settings."${traitName}.modeName",
-        attribute: settings."${traitName}.modeAttribute",
-        values:    splitValues(settings."${traitName}.modeValues"),
-    ]]
+    def mode = { String name, String attribute, String values ->
+        values = (values ?: "").trim()
+        values.startsWith("@") ?
+            [name: name, attribute: attribute, values: [], valuesAttribute: values.substring(1).trim()] :
+            [name: name, attribute: attribute, values: values.split(",").collect { it.trim() }.findAll { it }]
+    }
+    def modes = [mode(settings."${traitName}.modeName", settings."${traitName}.modeAttribute", settings."${traitName}.modeValues")]
     (settings."${traitName}.moreModes" ?: "").readLines().each { line ->
         def parts = line.split(/\|/).collect { it.trim() }
         if (parts.size() == 3 && parts.every { it }) {
-            modes << [name: parts[0], attribute: parts[1], values: splitValues(parts[2])]
+            modes << mode(parts[0], parts[1], parts[2])
         }
     }
     return [
-        modes:    modes.findAll { it.name && it.attribute && it.values },
+        modes:    modes.findAll { it.name && it.attribute && (it.values || it.valuesAttribute) },
         commands: [],
     ]
 }
