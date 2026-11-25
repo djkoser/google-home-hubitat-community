@@ -85,7 +85,7 @@
 //   * Jun 16 2026 - Optimize 'updated' method to only call 'allKnownDevices' once
 //   * Aug 03 2026 - Fix Authorization header in Report State requests on Hubitat 2.5.1
 //   * Nov 24 2026 - SensorState: skip sensor types a device has no reading for
-//   * Nov 25 2026 - Modes trait: number ranges ("1..500") for showing numeric readings
+//   * Nov 25 2026 - Modes trait: number ranges ("1..500", "1..500 step 5") for showing numeric readings
 //   * Nov 25 2026 - Modes trait: setting names prefixed with the mode name (unique, letter-first)
 //   * Nov 25 2026 - Modes trait: values can come from a device attribute ("@attr", a JSON list),
 //                   re-syncing with Google when that list changes
@@ -2106,7 +2106,7 @@ private deviceTraitPreferences_Modes(deviceTrait) {
         )
         input(
             name: "${deviceTrait.name}.moreModes",
-            title: "More modes, one per line: Name | attribute | values — value1,value2,... or 1..500 (whole numbers; readings are rounded) or @attribute (a device attribute holding a JSON list)",
+            title: "More modes, one per line: Name | attribute | values — value1,value2,... or 1..500 / 1..500 step 5 (numbers; readings are rounded; keep the total under ~1,100 values — Google sync is limited to 128 KB) or @attribute (a device attribute holding a JSON list)",
             type: "textarea",
             required: false
         )
@@ -3735,7 +3735,9 @@ private deviceStateForTrait_Modes(deviceTrait, device) {
         def value = device.currentValue(mode.attribute)
         if (value != null && mode.numeric) {
             try {
-                value = new BigDecimal(value.toString()).setScale(0, BigDecimal.ROUND_HALF_UP).toPlainString()
+                def n = new BigDecimal(value.toString())
+                def k = ((n - mode.lo) / mode.step).setScale(0, BigDecimal.ROUND_HALF_UP)
+                value = (mode.lo + k * mode.step).toString()
             } catch (NumberFormatException ex) {
                 value = null
             }
@@ -4831,10 +4833,15 @@ private traitFromSettings_Timer(traitName) {
 private traitFromSettings_Modes(traitName) {
     def mode = { String name, String attribute, String values ->
         values = (values ?: "").trim()
-        def range = values =~ /^(\d+)\s*\.\.\s*(\d+)$/
-        if (range.matches()) {   // "1..500": whole numbers; readings are rounded to match
-            def (lo, hi) = [range.group(1) as Integer, range.group(2) as Integer]
-            return [name: name, attribute: attribute, values: (lo..hi).collect { it.toString() }, numeric: true]
+        // "1..500" or "1..500 step 5": numbers; readings are rounded to the nearest listed value.
+        // Keep the total small: Hubitat's cloud relay limits Google's SYNC response to 128 KB
+        // (about 90 bytes per listed value).
+        def range = values =~ /^(\d+)\s*\.\.\s*(\d+)(?:\s+step\s+(\d+))?$/
+        if (range.matches()) {
+            def lo = range.group(1) as Integer, hi = range.group(2) as Integer
+            def step = Math.max(1, (range.group(3) ?: "1") as Integer)
+            def list = (lo..hi).step(step).collect { it.toString() }
+            return [name: name, attribute: attribute, values: list, numeric: true, lo: lo, step: step]
         }
         values.startsWith("@") ?
             [name: name, attribute: attribute, values: [], valuesAttribute: values.substring(1).trim()] :
