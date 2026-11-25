@@ -85,6 +85,7 @@
 //   * Jun 16 2026 - Optimize 'updated' method to only call 'allKnownDevices' once
 //   * Aug 03 2026 - Fix Authorization header in Report State requests on Hubitat 2.5.1
 //   * Nov 24 2026 - SensorState: skip sensor types a device has no reading for
+//   * Nov 25 2026 - Modes trait: number ranges ("1..500") for showing numeric readings
 //   * Nov 25 2026 - Modes trait: setting names prefixed with the mode name (unique, letter-first)
 //   * Nov 25 2026 - Modes trait: values can come from a device attribute ("@attr", a JSON list),
 //                   re-syncing with Google when that list changes
@@ -2099,13 +2100,13 @@ private deviceTraitPreferences_Modes(deviceTrait) {
         )
         input(
             name: "${deviceTrait.name}.modeValues",
-            title: "Attribute values (comma-separated, e.g. On,Recirculate,Off)",
+            title: "Attribute values (comma-separated, e.g. On,Recirculate,Off; or a number range like 1..500)",
             type: "text",
             required: true
         )
         input(
             name: "${deviceTrait.name}.moreModes",
-            title: "More modes, one per line: Name | attribute | value1,value2,... (or @attribute: a device attribute holding a JSON list of values)",
+            title: "More modes, one per line: Name | attribute | values — value1,value2,... or 1..500 (whole numbers; readings are rounded) or @attribute (a device attribute holding a JSON list)",
             type: "textarea",
             required: false
         )
@@ -3732,6 +3733,13 @@ private deviceStateForTrait_Modes(deviceTrait, device) {
     def current = [:]
     deviceTrait.modes.each { mode ->
         def value = device.currentValue(mode.attribute)
+        if (value != null && mode.numeric) {
+            try {
+                value = new BigDecimal(value.toString()).setScale(0, BigDecimal.ROUND_HALF_UP).toPlainString()
+            } catch (NumberFormatException ex) {
+                value = null
+            }
+        }
         if (value != null && value.toString() in modeValuesFor(mode, device)) {
             current[googleModeKey(mode.name)] = googleSettingKey(mode, value)
         }
@@ -4823,6 +4831,11 @@ private traitFromSettings_Timer(traitName) {
 private traitFromSettings_Modes(traitName) {
     def mode = { String name, String attribute, String values ->
         values = (values ?: "").trim()
+        def range = values =~ /^(\d+)\s*\.\.\s*(\d+)$/
+        if (range.matches()) {   // "1..500": whole numbers; readings are rounded to match
+            def (lo, hi) = [range.group(1) as Integer, range.group(2) as Integer]
+            return [name: name, attribute: attribute, values: (lo..hi).collect { it.toString() }, numeric: true]
+        }
         values.startsWith("@") ?
             [name: name, attribute: attribute, values: [], valuesAttribute: values.substring(1).trim()] :
             [name: name, attribute: attribute, values: values.split(",").collect { it.trim() }.findAll { it }]
