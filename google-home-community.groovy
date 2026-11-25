@@ -85,6 +85,7 @@
 //   * Jun 16 2026 - Optimize 'updated' method to only call 'allKnownDevices' once
 //   * Aug 03 2026 - Fix Authorization header in Report State requests on Hubitat 2.5.1
 //   * Nov 24 2026 - SensorState: skip sensor types a device has no reading for
+//   * Nov 25 2026 - Log Home Graph's error body when a state report fails
 //   * Nov 25 2026 - Add a query-only Modes trait (shows a multi-value attribute, e.g. ERV On/Recirculate/Off)
 
 import groovy.json.JsonException
@@ -201,8 +202,10 @@ private reportStateForDevices(devices) {
                 LOGGER.debug("Finished posting device state requestId=${requestId}")
             }
         } catch (Exception ex) {
+            def body = null
+            try { body = ex.response?.data } catch (Exception ignored) { }  // codenarc-disable-line EmptyCatchBlock
             LOGGER.exception(
-                "Error posting device state:\nrequest=${req}\n",
+                "Error posting device state:\nrequest=${req}\n" + (body != null ? "response=${body}\n" : ""),
                 ex
             )
         }
