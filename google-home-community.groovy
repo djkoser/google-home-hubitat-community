@@ -85,6 +85,8 @@
 //   * Jun 16 2026 - Optimize 'updated' method to only call 'allKnownDevices' once
 //   * Aug 03 2026 - Fix Authorization header in Report State requests on Hubitat 2.5.1
 //   * Nov 24 2026 - SensorState: skip sensor types a device has no reading for
+//   * Nov 25 2026 - Batched, asynchronous Home Graph reports and sync requests (upstream PRs #125, #127),
+//                   null-safe state merge (#126), typo fix (#124)
 //   * Nov 25 2026 - Modes trait: number ranges ("1..500", "1..500 step 5") for showing numeric readings
 //   * Nov 25 2026 - Modes trait: setting names prefixed with the mode name (unique, letter-first)
 //   * Nov 25 2026 - Modes trait: values can come from a device attribute ("@attr", a JSON list),
@@ -167,7 +169,32 @@ def handleDeviceEvent(event) {
         runIn(10, "requestSync", [overwrite: true])
         return
     }
-    reportStateForDevices([(deviceId): deviceInfo])
+    // Batch: a device often reports several attributes at once; send Google one report for
+    // all devices that changed within a second (upstream PR #125)
+    def pending = state.pendingReportDeviceIds ?: []
+    if (!pending.contains(deviceId as String)) {
+        pending << (deviceId as String)
+        state.pendingReportDeviceIds = pending
+    }
+    runIn(1, "flushStateReports", [overwrite: true])
+}
+
+def flushStateReports() {
+    def pendingIds = state.pendingReportDeviceIds
+    state.pendingReportDeviceIds = []
+    if (!pendingIds) {
+        return
+    }
+    def allDevices = allKnownDevices()
+    def devicesToReport = [:]
+    pendingIds.each { id ->
+        if (allDevices."${id}") {
+            devicesToReport."${id}" = allDevices."${id}"
+        }
+    }
+    if (devicesToReport) {
+        reportStateForDevices(devicesToReport)
+    }
 }
 
 private reportStateForDevices(devices) {
@@ -185,7 +212,10 @@ private reportStateForDevices(devices) {
     devices.each { deviceId, deviceInfo ->
         def deviceState = [:]
         deviceInfo.deviceType.traits.each { traitType, deviceTrait ->
-            deviceState += "deviceStateForTrait_${traitType}"(deviceTrait, deviceInfo.device)
+            def traitState = "deviceStateForTrait_${traitType}"(deviceTrait, deviceInfo.device)
+            if (traitState) {
+                deviceState.putAll(traitState)
+            }
         }
         if (deviceState.size()) {
             req.payload.devices.states."${deviceId}" = deviceState
@@ -207,17 +237,17 @@ private reportStateForDevices(devices) {
         ]
         LOGGER.debug("Posting device state requestId=${requestId}: ${params}")
         params.headers.Authorization = "Bearer ${token}"
+        params.requestContentType = "application/json"
+        params.contentType = "application/json"
+        // Asynchronous, so a slow Google response doesn't block the hub (upstream PR #127)
+        def callbackData = [
+            successMessage: "Finished posting device state requestId=${requestId}",
+            errorMessage: "Error posting device state:\nrequest=${req}\n",
+        ]
         try {
-            httpPostJson(params) { resp ->
-                LOGGER.debug("Finished posting device state requestId=${requestId}")
-            }
+            asynchttpPost("handleAsyncResponse", params, callbackData)
         } catch (Exception ex) {
-            def body = null
-            try { body = ex.response?.data } catch (Exception ignored) { }  // codenarc-disable-line EmptyCatchBlock
-            LOGGER.exception(
-                "Error posting device state:\nrequest=${req}\n" + (body != null ? "response=${body}\n" : ""),
-                ex
-            )
+            LOGGER.exception("Error sending device state:\nrequest=${req}\n", ex)
         }
     } else {
         LOGGER.debug("No device state to report; not sending device state report to Home Graph")
@@ -231,12 +261,33 @@ def requestSync() {
         headers: [
             Authorization: "Bearer ${fetchOAuthToken()}",
         ],
+        requestContentType: "application/json",
+        contentType: "application/json",
         body: [
             agentUserId: agentUserId,
         ],
     ]
-    httpPostJson(params) { resp ->
-        LOGGER.debug("Finished requesting Google sync devices")
+    try {
+        asynchttpPost("handleAsyncResponse", params, [
+            successMessage: "Finished requesting Google sync devices",
+            errorMessage: "Error requesting Google sync devices:\n",
+        ])
+    } catch (Exception ex) {
+        LOGGER.exception("Error sending Google sync request", ex)
+    }
+}
+
+def handleAsyncResponse(response, data) {
+    if (response.hasError()) {
+        def body = null
+        try {
+            body = response.getErrorData()
+        } catch (Exception ignored) {  // codenarc-disable-line EmptyCatchBlock
+        }
+        LOGGER.error("${data.errorMessage}status=${response.status} ${response.errorMessage}" +
+                     (body ? "\nresponse=${body}" : ""))
+    } else {
+        LOGGER.debug(data.successMessage)
     }
 }
 
@@ -2346,7 +2397,7 @@ private attributeHasExpectedValue(device, attrName, attrValue) {
         }
     } else if (currentValue != attrValue) {
         LOGGER.debug("${device.name}: current value of ${attrName} (${currentValue}) " +
-                     "does does not yet match expected value (${attrValue})")
+                     "does not yet match expected value (${attrValue})")
         return false
     }
     return true
