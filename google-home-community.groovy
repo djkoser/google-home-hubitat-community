@@ -84,6 +84,7 @@
 //   * May 08 2026 - Move to the new "Integrations" menu
 //   * Jun 16 2026 - Optimize 'updated' method to only call 'allKnownDevices' once
 //   * Aug 03 2026 - Fix Authorization header in Report State requests on Hubitat 2.5.1
+//   * Nov 24 2026 - SensorState: skip sensor types a device has no reading for
 
 import groovy.json.JsonException
 import groovy.json.JsonOutput
@@ -3536,11 +3537,16 @@ private deviceStateForTrait_SensorState(deviceTrait, device) {
             ]
         }
         if (deviceTrait.sensorTypes[sensorType.key].reportsNumericState) {
-            deviceStateMapping << [
-                rawValue: device.currentValue(deviceTrait.sensorTypes[sensorType.key].numericAttribute),
-            ]
+            def numericValue = device.currentValue(deviceTrait.sensorTypes[sensorType.key].numericAttribute)
+            if (numericValue != null) {
+                deviceStateMapping << [rawValue: numericValue]
+            }
         }
-        deviceState << deviceStateMapping
+        // Skip sensors this device has no reading for (e.g. an outdoor air monitor without a CO2
+        // sensor sharing a device type with indoor monitors) instead of reporting an empty state
+        if (deviceStateMapping.size() > 1) {
+            deviceState << deviceStateMapping
+        }
     }
 
     return [
