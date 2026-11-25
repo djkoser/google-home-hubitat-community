@@ -85,6 +85,7 @@
 //   * Jun 16 2026 - Optimize 'updated' method to only call 'allKnownDevices' once
 //   * Aug 03 2026 - Fix Authorization header in Report State requests on Hubitat 2.5.1
 //   * Nov 24 2026 - SensorState: skip sensor types a device has no reading for
+//   * Nov 25 2026 - Modes trait: setting names prefixed with the mode name (unique, letter-first)
 //   * Nov 25 2026 - Modes trait: values can come from a device attribute ("@attr", a JSON list),
 //                   re-syncing with Google when that list changes
 //   * Nov 25 2026 - Modes trait: more than one mode per device
@@ -3731,8 +3732,8 @@ private deviceStateForTrait_Modes(deviceTrait, device) {
     def current = [:]
     deviceTrait.modes.each { mode ->
         def value = device.currentValue(mode.attribute)
-        if (value != null && googleModeKey(value) in modeValuesFor(mode, device).collect { googleModeKey(it) }) {
-            current[googleModeKey(mode.name)] = googleModeKey(value)
+        if (value != null && value.toString() in modeValuesFor(mode, device)) {
+            current[googleModeKey(mode.name)] = googleSettingKey(mode, value)
         }
     }
     return current ? [currentModeSettings: current] : [:]
@@ -4218,7 +4219,7 @@ private attributesForTrait_Modes(deviceTrait, device) {
                 name_values: [[name_synonym: [mode.name], lang: "en"]],
                 settings: modeValuesFor(mode, device).collect { value ->
                     [
-                        setting_name: googleModeKey(value),
+                        setting_name: googleSettingKey(mode, value),
                         setting_values: [[setting_synonym: [value], lang: "en"]],
                     ]
                 },
@@ -4241,6 +4242,12 @@ private List modeValuesFor(mode, device) {
         LOGGER.warn("Modes: ${device} ${mode.valuesAttribute} is not a JSON list")
         return []
     }
+}
+
+// Setting names are prefixed with their mode's name: unique across a device's modes and never
+// starting with a digit (values like "175–199" otherwise make Google drop the mode)
+private String googleSettingKey(mode, value) {
+    return "${googleModeKey(mode.name)}_${googleModeKey(value)}"
 }
 
 // Google mode and setting names: lower case, no spaces
